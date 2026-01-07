@@ -20,6 +20,9 @@ interface VisualizerProps {
 const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMode, onPointMove, isEditing }) => {
   // Lock to ensure only one point can be dragged at a time
   const draggingRef = useRef<number | null>(null);
+  
+  // Store the offset between the mouse/touch and the point center to prevent jumping
+  const offsetRef = useRef<{ x: number, y: number }>({ x: 0, y: 0 });
 
   const { points, height } = specs.dimensions;
   
@@ -262,13 +265,11 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
         {viewMode === ViewMode.PLAN && isEditing && points.map((p, i) => {
           const pt = toIso(p, height);
           
-          // Helper for updating position
-          const getNewCoords = (clientX: number, clientY: number, svgRect: DOMRect) => {
+          // Helper to get raw mouse/touch coords in SVG space
+          const getRawCoords = (clientX: number, clientY: number, svgRect: DOMRect) => {
             const dx = (clientX - svgRect.left - svgWidth/2) / scale;
             const dy = (clientY - svgRect.top - svgHeight/2) / scale;
-            const nx = Math.round((dx + (minX + maxX)/2) / 100) * 100;
-            const ny = Math.round((dy + (minY + maxY)/2) / 100) * 100;
-            return { x: nx, y: ny };
+            return { x: dx, y: dy };
           };
 
           return (
@@ -280,12 +281,35 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                // Mouse Logic
+                
                 const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
+                const startRaw = getRawCoords(e.clientX, e.clientY, rect);
+                
+                // Calculate the initial offset: Current Mouse - Actual Point Center
+                // We use p.x/p.y transformed to the same coordinate space as 'startRaw'
+                const centerX = (p.x - (minX + maxX)/2);
+                const centerY = (p.y - (minY + maxY)/2);
+                
+                offsetRef.current = {
+                  x: startRaw.x - centerX,
+                  y: startRaw.y - centerY
+                };
+
                 const move = (me: MouseEvent) => {
                   me.preventDefault();
-                  onPointMove?.(i, getNewCoords(me.clientX, me.clientY, rect));
+                  const raw = getRawCoords(me.clientX, me.clientY, rect);
+                  
+                  // Apply offset to get the intended center
+                  const targetX = raw.x - offsetRef.current.x;
+                  const targetY = raw.y - offsetRef.current.y;
+
+                  // Convert back to absolute coordinates and snap
+                  const nx = Math.round((targetX + (minX + maxX)/2) / 100) * 100;
+                  const ny = Math.round((targetY + (minY + maxY)/2) / 100) * 100;
+                  
+                  onPointMove?.(i, { x: nx, y: ny });
                 };
+                
                 const up = () => {
                   window.removeEventListener('mousemove', move);
                   window.removeEventListener('mouseup', up);
@@ -298,23 +322,35 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
                 e.preventDefault();
                 e.stopPropagation();
 
-                // 1. MUTEX: Only allow one point to be dragged at a time
                 if (draggingRef.current !== null && draggingRef.current !== i) return;
                 draggingRef.current = i;
 
                 const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
-                
-                // 2. ID TRACKING: Grab the specific ID of the finger that touched THIS point
                 const startTouch = e.changedTouches[0];
                 const touchId = startTouch.identifier;
                 
+                // Calculate initial offset
+                const startRaw = getRawCoords(startTouch.clientX, startTouch.clientY, rect);
+                const centerX = (p.x - (minX + maxX)/2);
+                const centerY = (p.y - (minY + maxY)/2);
+                
+                offsetRef.current = {
+                  x: startRaw.x - centerX,
+                  y: startRaw.y - centerY
+                };
+                
                 const move = (te: TouchEvent) => {
-                   // 3. FILTER: Only respond if the moving finger matches the one we started with
-                   // This ignores other fingers moving on the screen
                    const touch = Array.from(te.changedTouches).find(t => t.identifier === touchId);
                    if (!touch) return; 
                    
-                   onPointMove?.(i, getNewCoords(touch.clientX, touch.clientY, rect));
+                   const raw = getRawCoords(touch.clientX, touch.clientY, rect);
+                   const targetX = raw.x - offsetRef.current.x;
+                   const targetY = raw.y - offsetRef.current.y;
+
+                   const nx = Math.round((targetX + (minX + maxX)/2) / 100) * 100;
+                   const ny = Math.round((targetY + (minY + maxY)/2) / 100) * 100;
+                   
+                   onPointMove?.(i, { x: nx, y: ny });
                 };
                 
                 const end = (te: TouchEvent) => {
@@ -324,8 +360,6 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
                   window.removeEventListener('touchmove', move);
                   window.removeEventListener('touchend', end);
                   window.removeEventListener('touchcancel', end);
-                  
-                  // Release the lock
                   draggingRef.current = null;
                 };
                 
@@ -334,7 +368,7 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
                 window.addEventListener('touchcancel', end);
               }}
             >
-              <circle cx={pt.x} cy={pt.y} r="30" fill="transparent" /> {/* Larger touch target */}
+              <circle cx={pt.x} cy={pt.y} r="30" fill="transparent" />
               <circle cx={pt.x} cy={pt.y} r="20" fill="#f97316" fillOpacity="0.15" />
               <circle cx={pt.x} cy={pt.y} r="8" fill="#f97316" stroke="white" strokeWidth="2" />
             </g>
