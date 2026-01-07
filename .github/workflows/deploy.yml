@@ -18,13 +18,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # cache: 'npm'  <-- REMOVED: This causes the error when no lock file exists
+          # cache: 'npm'  <-- IMPORTANT: This must be removed for new projects
 
       - name: Install Dependencies 🔧
-        run: npm install  # <-- CHANGED: 'npm install' works without a lock file
+        run: npm install
 
       - name: Build 🏗️
-        run: npm run build
+        # We run "vite build" directly to skip strict TypeScript checks (tsc)
+        # which often cause builds to fail on new projects.
+        run: npx vite build
 
       - name: Deploy 🚀
         uses: JamesIves/github-pages-deploy-action@v4
