@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { DeckSpecs, CalculationResult, Point, ViewMode } from '../types';
 import { JOIST_SPACING, DECKING_GAP, DECKING_SPECS } from '../constants';
@@ -124,7 +123,7 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
 
   return (
     <div id="deck-visualizer-frame" className="bg-slate-50 p-6 rounded-3xl shadow-inner flex flex-col items-center border border-slate-200 relative overflow-hidden">
-      <svg id="deck-plan-svg" viewBox={`0 0 ${svgWidth} ${svgHeight}`} xmlns="http://www.w3.org/2000/svg" className="w-full h-auto rounded-2xl bg-white shadow-lg overflow-visible">
+      <svg id="deck-plan-svg" viewBox={`0 0 ${svgWidth} ${svgHeight}`} xmlns="http://www.w3.org/2000/svg" className="w-full h-auto rounded-2xl bg-white shadow-lg overflow-visible touch-none">
         <defs>
           <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
             <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#f1f5f9" strokeWidth="1"/>
@@ -259,20 +258,56 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
 
         {viewMode === ViewMode.PLAN && isEditing && points.map((p, i) => {
           const pt = toIso(p, height);
+          
+          // Helper for updating position
+          const getNewCoords = (clientX: number, clientY: number, svgRect: DOMRect) => {
+            const dx = (clientX - svgRect.left - svgWidth/2) / scale;
+            const dy = (clientY - svgRect.top - svgHeight/2) / scale;
+            const nx = Math.round((dx + (minX + maxX)/2) / 100) * 100;
+            const ny = Math.round((dy + (minY + maxY)/2) / 100) * 100;
+            return { x: nx, y: ny };
+          };
+
           return (
-            <g key={`h-${i}`} onMouseDown={(e) => {
-              const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
-              const move = (me: MouseEvent) => {
-                const dx = (me.clientX - rect.left - svgWidth/2) / scale;
-                const dy = (me.clientY - rect.top - svgHeight/2) / scale;
-                const nx = Math.round((dx + (minX + maxX)/2) / 100) * 100;
-                const ny = Math.round((dy + (minY + maxY)/2) / 100) * 100;
-                onPointMove?.(i, { x: nx, y: ny });
-              };
-              window.addEventListener('mousemove', move);
-              window.addEventListener('mouseup', () => window.removeEventListener('mousemove', move), { once: true });
-            }}>
-              <circle cx={pt.x} cy={pt.y} r="20" fill="#f97316" fillOpacity="0.15" className="cursor-move" />
+            <g 
+              key={`h-${i}`} 
+              className="cursor-move"
+              style={{ touchAction: 'none' }} // Crucial: Prevents browser scrolling while dragging
+              
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
+                const move = (me: MouseEvent) => onPointMove?.(i, getNewCoords(me.clientX, me.clientY, rect));
+                const up = () => {
+                  window.removeEventListener('mousemove', move);
+                  window.removeEventListener('mouseup', up);
+                };
+                window.addEventListener('mousemove', move);
+                window.addEventListener('mouseup', up);
+              }}
+              
+              onTouchStart={(e) => {
+                e.preventDefault(); // Prevents scroll initiation
+                const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
+                
+                const move = (te: TouchEvent) => {
+                   // te.preventDefault(); // Sometimes needed on older browsers
+                   const touch = te.touches[0];
+                   if (touch) onPointMove?.(i, getNewCoords(touch.clientX, touch.clientY, rect));
+                };
+                
+                const end = () => {
+                  window.removeEventListener('touchmove', move);
+                  window.removeEventListener('touchend', end);
+                };
+                
+                // Passive: false allows us to use preventDefault if needed
+                window.addEventListener('touchmove', move, { passive: false });
+                window.addEventListener('touchend', end);
+              }}
+            >
+              <circle cx={pt.x} cy={pt.y} r="30" fill="transparent" /> {/* Larger invisible touch target */}
+              <circle cx={pt.x} cy={pt.y} r="20" fill="#f97316" fillOpacity="0.15" />
               <circle cx={pt.x} cy={pt.y} r="8" fill="#f97316" stroke="white" strokeWidth="2" />
             </g>
           );
