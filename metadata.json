@@ -1,0 +1,5 @@
+{
+  "name": "KiwiDeck Planner",
+  "description": "A structural deck planner and shopping list generator for New Zealand DIYers, compliant with NZS 3604:2011 logic.",
+  "requestFramePermissions": []
+}
