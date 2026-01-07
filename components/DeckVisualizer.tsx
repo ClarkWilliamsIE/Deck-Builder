@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { DeckSpecs, CalculationResult, Point, ViewMode } from '../types';
 import { JOIST_SPACING, DECKING_GAP, DECKING_SPECS } from '../constants';
 import { isPointInPolygon, getHorizontalIntersections, getVerticalIntersections } from '../logic/calculator';
@@ -18,6 +18,9 @@ interface VisualizerProps {
 }
 
 const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMode, onPointMove, isEditing }) => {
+  // Lock to ensure only one point can be dragged at a time
+  const draggingRef = useRef<number | null>(null);
+
   const { points, height } = specs.dimensions;
   
   const svgWidth = 800;
@@ -272,12 +275,17 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
             <g 
               key={`h-${i}`} 
               className="cursor-move"
-              style={{ touchAction: 'none' }} // Crucial: Prevents browser scrolling while dragging
+              style={{ touchAction: 'none' }} 
               
               onMouseDown={(e) => {
                 e.preventDefault();
+                e.stopPropagation();
+                // Mouse Logic
                 const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
-                const move = (me: MouseEvent) => onPointMove?.(i, getNewCoords(me.clientX, me.clientY, rect));
+                const move = (me: MouseEvent) => {
+                  me.preventDefault();
+                  onPointMove?.(i, getNewCoords(me.clientX, me.clientY, rect));
+                };
                 const up = () => {
                   window.removeEventListener('mousemove', move);
                   window.removeEventListener('mouseup', up);
@@ -287,26 +295,46 @@ const DeckVisualizer: React.FC<VisualizerProps> = ({ specs, calc, layers, viewMo
               }}
               
               onTouchStart={(e) => {
-                e.preventDefault(); // Prevents scroll initiation
+                e.preventDefault();
+                e.stopPropagation();
+
+                // 1. MUTEX: Only allow one point to be dragged at a time
+                if (draggingRef.current !== null && draggingRef.current !== i) return;
+                draggingRef.current = i;
+
                 const rect = (e.currentTarget as any).ownerSVGElement.getBoundingClientRect();
                 
+                // 2. ID TRACKING: Grab the specific ID of the finger that touched THIS point
+                const startTouch = e.changedTouches[0];
+                const touchId = startTouch.identifier;
+                
                 const move = (te: TouchEvent) => {
-                   // te.preventDefault(); // Sometimes needed on older browsers
-                   const touch = te.touches[0];
-                   if (touch) onPointMove?.(i, getNewCoords(touch.clientX, touch.clientY, rect));
+                   // 3. FILTER: Only respond if the moving finger matches the one we started with
+                   // This ignores other fingers moving on the screen
+                   const touch = Array.from(te.changedTouches).find(t => t.identifier === touchId);
+                   if (!touch) return; 
+                   
+                   onPointMove?.(i, getNewCoords(touch.clientX, touch.clientY, rect));
                 };
                 
-                const end = () => {
+                const end = (te: TouchEvent) => {
+                  const touch = Array.from(te.changedTouches).find(t => t.identifier === touchId);
+                  if (!touch) return;
+
                   window.removeEventListener('touchmove', move);
                   window.removeEventListener('touchend', end);
+                  window.removeEventListener('touchcancel', end);
+                  
+                  // Release the lock
+                  draggingRef.current = null;
                 };
                 
-                // Passive: false allows us to use preventDefault if needed
                 window.addEventListener('touchmove', move, { passive: false });
                 window.addEventListener('touchend', end);
+                window.addEventListener('touchcancel', end);
               }}
             >
-              <circle cx={pt.x} cy={pt.y} r="30" fill="transparent" /> {/* Larger invisible touch target */}
+              <circle cx={pt.x} cy={pt.y} r="30" fill="transparent" /> {/* Larger touch target */}
               <circle cx={pt.x} cy={pt.y} r="20" fill="#f97316" fillOpacity="0.15" />
               <circle cx={pt.x} cy={pt.y} r="8" fill="#f97316" stroke="white" strokeWidth="2" />
             </g>
